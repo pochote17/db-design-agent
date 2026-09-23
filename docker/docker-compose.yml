@@ -1,0 +1,35 @@
+services:
+  db-design-agent:
+    build:
+      context: ..
+      file: docker/Dockerfile
+    environment:
+      - DB_AGENT_LLM_PROVIDER=${DB_AGENT_LLM_PROVIDER:-groq}
+      - DB_AGENT_LLM_MODEL=${DB_AGENT_LLM_MODEL:-llama-3.1-70b-versatile}
+      - DB_AGENT_GROQ_API_KEY=${DB_AGENT_GROQ_API_KEY}
+      - DB_AGENT_OPENAI_API_KEY=${DB_AGENT_OPENAI_API_KEY}
+      - DB_AGENT_ANTHROPIC_API_KEY=${DB_AGENT_ANTHROPIC_API_KEY}
+      - DB_AGENT_CHROMA_PERSIST_DIR=/app/data/chroma
+      - DB_AGENT_OUTPUT_DIR=/app/output
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+    profiles:
+      - default
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles:
+      - local
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  ollama_data:
