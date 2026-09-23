@@ -1,13 +1,17 @@
 """Nodes for the database design agent graph."""
 
-from .ddl import ddl_node
+from .retrieve import retrieve_node
 from .design import design_node
 from .dictionary import dictionary_node
-from .retrieve import retrieve_node
+from .ddl import ddl_node
+from .questions import generate_questions_node, process_answers_node, check_readiness_node
 
 __all__ = [
     "retrieve_node",
     "design_node",
     "dictionary_node",
     "ddl_node",
+    "generate_questions_node",
+    "process_answers_node",
+    "check_readiness_node",
 ]

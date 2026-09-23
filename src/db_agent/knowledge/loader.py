@@ -119,7 +119,10 @@ def ensure_knowledge_loaded(vectorstore: Chroma) -> int:
 
 def retrieve_patterns(vectorstore: Chroma, query: str, k: int = 5) -> list[str]:
     """Retrieve relevant patterns for a query."""
-    if not query.strip():
+    from ..security import validate_query_input
+    query = validate_query_input(query)
+
+    if not query:
         return []
 
     try:

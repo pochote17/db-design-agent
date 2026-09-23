@@ -68,3 +68,10 @@ class AgentState(BaseModel):
     database_schema: DatabaseSchema | None = None
     data_dictionary: list[DataDictionaryEntry] = []
     sql_ddl: str = ""
+
+    # Interactive mode fields
+    conversation_history: list[dict[str, str]] = []
+    pending_questions: list[str] = []
+    clarification_round: int = 0
+    is_ready: bool = False
+    enriched_context: str = ""

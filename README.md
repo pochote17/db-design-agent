@@ -5,11 +5,12 @@ AI agent for database schema design from business context. Describe your busines
 ## Features
 
 - **Natural language input**: Describe your business context in plain text
-- **Multiple LLM providers**: Groq (default), Ollama (local), OpenAI, Anthropic
+- **Multiple LLM providers**: Groq, Ollama (local), OpenAI, Anthropic
 - **RAG-enhanced**: Retrieves relevant database design patterns for better results
 - **Complete output**: Schema (JSON), Data Dictionary (Markdown/JSON), SQL DDL (PostgreSQL)
 - **CLI & Library**: Use as command-line tool or import in Python
 - **Zero-config local**: Works with Ollama for fully offline usage
+- **Security-first**: Prompt injection detection, SQL injection prevention, rate limiting, audit logging
 
 ## Quick Start
 
@@ -45,7 +46,7 @@ export DB_AGENT_LLM_MODEL=llama-3.1-70b-versatile
 ### Usage
 
 ```bash
-# Basic usage
+# Basic usage (uses Ollama locally by default)
 db-design-agent design "E-commerce platform with users, products, orders, and payments"
 
 # With specific provider
@@ -85,8 +86,8 @@ The agent generates three files in `./output/` by default:
 │  Business   │────▶│  Retrieval  │────▶│   Design    │
 │  Context    │     │  (RAG)      │     │   Schema    │
 └─────────────┘     └─────────────┘     └─────────────┘
-                                              │
-                                              ▼
+                                               │
+                                               ▼
 ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
 │   Output    │◀────│  Data Dict  │◀────│   DDL Gen   │
 │  (JSON/SQL/ │     │  Generation │     │             │
@@ -110,7 +111,7 @@ Configuration is loaded from (in order of precedence):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DB_AGENT_LLM_PROVIDER` | LLM provider (groq, ollama, openai, anthropic) | groq |
+| `DB_AGENT_LLM_PROVIDER` | LLM provider (groq, ollama, openai, anthropic) | ollama |
 | `DB_AGENT_LLM_MODEL` | Model name | provider-specific default |
 | `DB_AGENT_GROQ_API_KEY` | Groq API key | - |
 | `DB_AGENT_OPENAI_API_KEY` | OpenAI API key | - |
@@ -120,6 +121,29 @@ Configuration is loaded from (in order of precedence):
 | `DB_AGENT_CHROMA_PERSIST_DIR` | ChromaDB directory | ./chroma_db |
 | `DB_AGENT_OUTPUT_DIR` | Output directory | ./output |
 | `DB_AGENT_LOG_LEVEL` | Log level | INFO |
+
+### Default Models per Provider
+
+| Provider | Default Model |
+|----------|---------------|
+| Groq | `llama-3.1-70b-versatile` |
+| Ollama | `llama3.1:8b` |
+| OpenAI | `gpt-4o-mini` |
+| Anthropic | `claude-3-haiku-20240307` |
+
+## Security
+
+db-design-agent implements multiple layers of security:
+
+- **Prompt Injection Detection**: Regex-based detection of common injection patterns (ignore instructions, roleplay, system prompt extraction). Detected attempts are blocked and logged.
+- **SQL Injection Prevention**: Generated DDL is validated against a forbidden pattern list (DML, dangerous DDL, transaction control) and parsed with `sqlparse` to ensure only allowed statements (`CREATE TABLE`, `CREATE INDEX`, `COMMENT ON`, `ALTER TABLE` with constraints).
+- **Input Validation**: All user inputs validated (max 10,000 chars context, 1,000 chars query). Control characters removed, length limited, curly braces escaped.
+- **Rate Limiting**: CLI `design` command limited to 5 requests/minute per process.
+- **Audit Logging**: Security events (prompt injection, SQL injection, validation failures) logged to `./logs/security.log`.
+- **Path Safety**: Output directories resolved absolutely, symlinks resolved, traversal prevented.
+- **Secrets**: `SecretStr` for API keys, never logged, excluded from serialization.
+
+See [docs/security.md](docs/security.md) for full details.
 
 ## Development
 
@@ -168,6 +192,7 @@ src/db_agent/
 ├── prompts.py          # Prompt templates
 ├── llm.py              # LLM factory (provider abstraction)
 ├── graph.py            # LangGraph workflow compilation
+├── security.py         # Security utilities (sanitization, validation, logging)
 ├── knowledge/
 │   └── loader.py       # Knowledge base (embedded patterns)
 ├── nodes/
@@ -209,12 +234,17 @@ docker compose -f docker/docker-compose.yml --profile local run --rm \
 
 ## Security
 
-- API keys loaded only from environment variables or `.env` files (never hardcoded)
-- `SecretStr` used for sensitive configuration values
-- Input validation on all user-provided data
-- No `eval()`/`exec()` or dynamic code execution
-- Path traversal protection on output directories
-- Non-root user in Docker container
+db-design-agent implements multiple layers of security:
+
+- **Prompt Injection Detection**: Regex-based detection of common injection patterns (ignore instructions, roleplay, system prompt extraction). Detected attempts are blocked and logged.
+- **SQL Injection Prevention**: Generated DDL is validated against a forbidden pattern list (DML, dangerous DDL, transaction control) and parsed with `sqlparse` to ensure only allowed statements (`CREATE TABLE`, `CREATE INDEX`, `COMMENT ON`, `ALTER TABLE` with constraints).
+- **Input Validation**: All user inputs validated (max 10,000 chars context, 1,000 chars query). Control characters removed, length limited, curly braces escaped.
+- **Rate Limiting**: CLI `design` command limited to 5 requests/minute per process.
+- **Audit Logging**: Security events (prompt injection, SQL injection, validation failures) logged to `./logs/security.log`.
+- **Path Safety**: Output directories resolved absolutely, symlinks resolved, traversal prevented.
+- **Secrets**: `SecretStr` for API keys, never logged, excluded from serialization.
+
+See [docs/security.md](docs/security.md) for full details.
 
 ## Contributing
 

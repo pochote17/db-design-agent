@@ -11,18 +11,34 @@ db-design-agent is a CLI tool that:
 ### Attack Vectors
 
 1. **Prompt Injection**: Malicious context attempting to alter agent behavior
-2. **Path Traversal**: Output directory manipulation to write outside intended location
-3. **Secret Exposure**: API keys leaked in logs, errors, or output files
-4. **SSRF**: Ollama base URL pointing to internal services
-5. **Dependency Confusion**: Malicious packages in supply chain
+2. **SQL Injection**: Malicious LLM output attempting to execute arbitrary SQL
+3. **Path Traversal**: Output directory manipulation to write outside intended location
+4. **Secret Exposure**: API keys leaked in logs, errors, or output files
+5. **SSRF**: Ollama base URL pointing to internal services
+6. **Dependency Confusion**: Malicious packages in supply chain
 
 ## Mitigations
 
 ### Input Validation
 
-- Business context: Plain text, no markup interpretation
-- Pydantic models validate all structured data
-- `extra="forbid"` prevents unexpected fields
+- Business context: Plain text, max 10,000 chars, no markup interpretation
+- Query for vector search: Max 1,000 chars
+- Pydantic models validate all structured data with `extra="forbid"`
+- Input sanitization: control chars removed, length limited, whitespace normalized
+
+### Prompt Injection Protection
+
+- **Detection**: Regex patterns for common injection attempts (ignore instructions, roleplay, system prompt extraction, etc.)
+- **Validation**: All user inputs validated before being passed to LLM
+- **Sanitization**: Curly braces escaped (`{` → `{{`, `}` → `}}`) to prevent template injection
+- **Response**: Detected attempts raise `ValidationError` and are logged
+
+### SQL Injection Protection (DDL Output)
+
+- **Forbidden patterns**: Regex detection for DML (`DROP`, `DELETE`, `UPDATE`, `INSERT`, `TRUNCATE`), dangerous DDL (`ALTER DATABASE`, `CREATE USER`, `GRANT`), transaction control, `COPY`, `EXEC`
+- **Statement allowlist**: Only `CREATE TABLE`, `CREATE INDEX`, `COMMENT ON`, `ALTER TABLE` (with `ADD CONSTRAINT/COLUMN`) allowed
+- **Parsing**: Generated SQL parsed with `sqlparse` for structural validation
+- **Post-generation validation**: Runs after LLM generation, before saving
 
 ### Path Safety
 
@@ -52,7 +68,21 @@ if not output_dir.is_relative_to(Path.cwd()):
 
 - `HttpUrl` type validates Ollama URL format
 - Default points to localhost
-- Future: allowlist configuration for production
+- `follow_redirects=True` with status check on final response
+
+### Rate Limiting
+
+- CLI `design` command limited to 5 requests per minute (in-memory, per process)
+- Prevents abuse and excessive LLM API costs
+
+### Audit Logging
+
+Security events logged to `./logs/security.log`:
+- Prompt injection attempts (pattern matched, input logged)
+- SQL injection attempts in generated DDL (pattern matched, DDL logged)
+- Input validation failures
+
+Log format: `timestamp | event_type | detail | input_sample`
 
 ### Dependency Security
 

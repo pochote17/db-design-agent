@@ -11,7 +11,7 @@ def test_default_settings() -> None:
     """Test default settings values."""
     settings = Settings()
     assert settings.llm_provider == LLMProvider.OLLAMA
-    assert settings.llm_model == "gemma4:12b"
+    assert settings.llm_model == "llama3.1:8b"
     assert settings.embedding_provider == EmbeddingProvider.OLLAMA
     assert settings.embedding_model == "nomic-embed-text"
 
@@ -56,6 +56,6 @@ def test_get_default_model() -> None:
     """Test default model per provider."""
     settings = Settings()
     assert settings.get_default_model(LLMProvider.GROQ) == "llama-3.1-70b-versatile"
-    assert settings.get_default_model(LLMProvider.OLLAMA) == "gemma4:12b"
+    assert settings.get_default_model(LLMProvider.OLLAMA) == "llama3.1:8b"
     assert settings.get_default_model(LLMProvider.OPENAI) == "gpt-4o-mini"
     assert settings.get_default_model(LLMProvider.ANTHROPIC) == "claude-3-haiku-20240307"

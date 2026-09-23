@@ -1,6 +1,8 @@
 """CLI for db-design-agent."""
 
 import sys
+import time
+from collections import deque
 from pathlib import Path
 
 import typer
@@ -10,7 +12,8 @@ from rich.table import Table
 
 from .config import LLMProvider, Settings, get_settings
 from .exceptions import AgentError, ConfigurationError
-from .graph import run_agent
+from .graph import run_agent, build_graph
+from .models import AgentState
 from .output import OutputFormat, print_results, save_outputs
 
 app = typer.Typer(
@@ -23,12 +26,163 @@ app = typer.Typer(
 console = Console()
 err_console = Console(stderr=True)
 
+# Rate limiting: max 5 requests per minute
+_REQUEST_TIMESTAMPS: deque[float] = deque(maxlen=5)
+_RATE_LIMIT_WINDOW = 60.0  # seconds
+_RATE_LIMIT_MAX = 5
+
+
+def _check_rate_limit() -> None:
+    """Check if rate limit is exceeded. Raises SystemExit if exceeded."""
+    now = time.time()
+    # Remove timestamps outside the window
+    while _REQUEST_TIMESTAMPS and now - _REQUEST_TIMESTAMPS[0] > _RATE_LIMIT_WINDOW:
+        _REQUEST_TIMESTAMPS.popleft()
+
+    if len(_REQUEST_TIMESTAMPS) >= _RATE_LIMIT_MAX:
+        oldest = _REQUEST_TIMESTAMPS[0]
+        wait_time = int(_RATE_LIMIT_WINDOW - (time.time() - oldest)) + 1
+        err_console.print(
+            f"[bold red]Rate limit exceeded:[/bold red] "
+            f"Maximum {_RATE_LIMIT_MAX} requests per minute. "
+            f"Please wait {wait_time} seconds."
+        )
+        raise typer.Exit(1)
+
+    _REQUEST_TIMESTAMPS.append(now)
+
 
 def _get_format_list(format_str: str) -> list[OutputFormat]:
     """Parse format string into list."""
     if format_str == "all":
         return ["json", "sql", "md"]
     return [f.strip() for f in format_str.split(",") if f.strip() in ("json", "sql", "md")]
+
+
+def _run_interactive_design(context: str, settings: Settings, console: Console) -> "AgentState":
+    """Run the design process in interactive mode with human-in-the-loop."""
+    import asyncio
+    from rich.prompt import Prompt
+
+    from .graph import build_graph
+    from .models import AgentState
+    from .llm import create_chat_model, create_embeddings
+    from .knowledge import create_vectorstore, ensure_knowledge_loaded
+    from langchain_chroma import Chroma
+    from pathlib import Path
+    from .nodes import retrieve_node, generate_questions_node, process_answers_node, check_readiness_node, design_node, dictionary_node, ddl_node
+
+    console.print("\n[bold cyan]🔄 Interactive Mode Enabled[/bold cyan]")
+    console.print("The agent will ask up to 3 rounds of clarifying questions.")
+    console.print("Answer each question. Write 'N/A' if a question doesn't apply.\n")
+
+    # Build vectorstore and load knowledge
+    llm = create_chat_model(settings)
+    embeddings = create_embeddings(settings)
+    chroma_dir = settings.resolve_chroma_dir(Path.cwd())
+    vectorstore = Chroma(
+        persist_directory=str(chroma_dir),
+        embedding_function=embeddings,
+        collection_name="db_design_patterns",
+    )
+    from .knowledge import ensure_knowledge_loaded
+    ensure_knowledge_loaded(vectorstore)
+
+    # Initial state
+    state = {
+        "business_context": context.strip(),
+        "relevant_patterns": [],
+        "conversation_history": [],
+        "clarification_round": 0,
+        "is_ready": False,
+        "enriched_context": "",
+        "pending_questions": [],
+        "database_schema": None,
+        "data_dictionary": [],
+        "sql_ddl": "",
+    }
+
+    # Run retrieve
+    console.print("[bold]Step 1:[/bold] Retrieving relevant patterns...")
+    from .nodes import retrieve_node
+    state = retrieve_node(state, vectorstore)
+
+    # Interactive loop: generate questions -> get answers -> process -> check readiness
+    max_rounds = 3
+
+    while state["clarification_round"] < max_rounds and not state.get("is_ready", False):
+        # Generate questions
+        console.print(f"\n[bold]Round {state['clarification_round'] + 1} of 3:[/bold] Generating questions...")
+        from .nodes import generate_questions_node
+        llm = create_chat_model(settings)
+        question_result = generate_questions_node(state, llm)
+        state.update(question_result)
+
+        if state.get("is_ready") or not state.get("pending_questions"):
+            break
+
+        # Display questions and get answers
+        questions = state["pending_questions"]
+        console.print(f"\n[bold cyan]Round {state['clarification_round'] + 1} of 3 - Clarifying Questions:[/bold cyan]")
+        for idx, q in enumerate(questions):
+            console.print(f"\n[bold]Q{idx + 1}:[/bold] {q['question']}")
+            console.print(f"[dim]Reason: {q['reasoning']}[/dim]")
+            if q["type"] == "multiple_choice" and "options" in q:
+                console.print(f"[green]Options:[/green] {', '.join(q['options'])}")
+            elif q["type"] == "yes_no":
+                console.print("[green]Options:[/green] Yes / No")
+            else:
+                console.print("[green]Type:[/green] Open-ended")
+
+            # Get answer
+            while True:
+                answer = Prompt.ask(f"[bold]Your answer[/bold]").strip()
+                if answer:
+                    break
+                console.print("[yellow]Answer cannot be empty. Write 'N/A' if not applicable.[/yellow]")
+
+            # Store answer in conversation history
+            state["conversation_history"].append({
+                "question_id": q["id"],
+                "question": q["question"],
+                "answer": answer,
+                "round": state["clarification_round"] + 1,
+            })
+
+        # Process answers
+        console.print("\n[bold]Processing answers...[/bold]")
+        from .nodes import process_answers_node
+        llm = create_chat_model(settings)
+        answer_result = process_answers_node(state, llm)
+        state.update(answer_result)
+
+        # Check readiness
+        console.print("[bold]Checking if ready to design...[/bold]")
+        from .nodes import check_readiness_node
+        readiness_result = check_readiness_node(state, llm)
+        state.update(readiness_result)
+
+        if state.get("is_ready"):
+            console.print("[green]✓[/green] Ready to generate schema!")
+            break
+
+        console.print(f"[yellow]Need more information. Continuing to round {state['clarification_round'] + 1}...[/yellow]")
+
+    # If not ready after max rounds, force ready
+    if not state.get("is_ready"):
+        state["is_ready"] = True
+        console.print("[yellow]Max rounds reached. Proceeding with current information...[/yellow]")
+
+    # Now run the rest of the graph: design -> dictionary -> ddl
+    console.print("\n[bold]Generating database schema...[/bold]")
+    from .nodes import design_node, dictionary_node, ddl_node
+    llm = create_chat_model(settings)
+
+    state = design_node(state, llm)
+    state = dictionary_node(state, llm)
+    state = ddl_node(state, llm)
+
+    return AgentState.model_validate(state)
 
 
 def _validate_provider_config(provider: LLMProvider, settings: Settings) -> None:
@@ -73,8 +227,14 @@ def design(
     config_file: Path | None = typer.Option(
         None, "--config", "-c", help="Path to .env config file"
     ),
+    interactive: bool = typer.Option(
+        False, "--interactive", "-i", help="Enable interactive mode with clarifying questions"
+    ),
 ) -> None:
     """Design database schema from business context."""
+    # Rate limiting
+    _check_rate_limit()
+
     try:
         settings = get_settings(config_file)
 
@@ -101,9 +261,12 @@ def design(
         console.print(f"[bold]Model:[/bold] {settings.llm_model}")
         console.print(f"[bold]Context:[/bold] {context[:100]}{'...' if len(context) > 100 else ''}")
 
-        with console.status("[bold green]Analyzing and designing...[/bold green]"):
-            import asyncio
-            state = asyncio.run(run_agent(context, settings))
+        if interactive:
+            state = _run_interactive_design(context, settings, console)
+        else:
+            with console.status("[bold green]Analyzing and designing...[/bold green]"):
+                import asyncio
+                state = asyncio.run(run_agent(context, settings))
 
         print_results(state, verbose)
 
@@ -247,8 +410,12 @@ def doctor(
     if settings.llm_provider == LLMProvider.OLLAMA or settings.embedding_provider.value == "ollama":
         try:
             import httpx
-            response = httpx.get(str(settings.ollama_base_url) + "/api/tags", timeout=5.0)
-            if response.status_code == 200:
+            response = httpx.get(
+                str(settings.ollama_base_url) + "/api/tags",
+                timeout=5.0,
+                follow_redirects=True,
+            )
+            if response.is_success:
                 models = response.json().get("models", [])
                 model_names = [m["name"] for m in models]
                 checks.append(("Ollama", "OK", f"Running, {len(models)} models available"))

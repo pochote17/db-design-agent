@@ -1,12 +1,12 @@
 """Design node for the database design agent."""
 
-
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
 
 from ..exceptions import ValidationError
 from ..models import AgentState, DatabaseSchema
 from ..prompts import format_design_prompt
+from ..security import sanitize_for_prompt
 
 
 def design_node(state: AgentState, llm: BaseChatModel) -> dict:
@@ -17,8 +17,9 @@ def design_node(state: AgentState, llm: BaseChatModel) -> dict:
     if not state.relevant_patterns:
         raise ValidationError("No relevant patterns retrieved", "relevant_patterns")
 
-    patterns_text = "\n\n".join(state.relevant_patterns)
-    messages = format_design_prompt(state.business_context, patterns_text)
+    # Sanitize patterns for safe inclusion in prompt
+    safe_patterns = "\n\n".join(sanitize_for_prompt(p) for p in state.relevant_patterns)
+    messages = format_design_prompt(state.business_context, safe_patterns)
 
     parser = JsonOutputParser(pydantic_object=DatabaseSchema)
 

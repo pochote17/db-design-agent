@@ -17,6 +17,7 @@ dependencies = [
     "typer>=0.9",
     "rich>=13",
     "python-dotenv>=1.0",
+    "sqlparse>=0.5",
 ]
 
 [project.optional-dependencies]

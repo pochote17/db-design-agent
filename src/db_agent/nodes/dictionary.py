@@ -1,5 +1,6 @@
 """Dictionary node for the database design agent."""
 
+import json
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
@@ -7,6 +8,7 @@ from langchain_core.output_parsers import JsonOutputParser
 from ..exceptions import ValidationError
 from ..models import AgentState, DataDictionaryEntry
 from ..prompts import format_dictionary_prompt
+from ..security import sanitize_for_prompt
 
 
 def dictionary_node(state: AgentState, llm: BaseChatModel) -> dict:
@@ -14,7 +16,11 @@ def dictionary_node(state: AgentState, llm: BaseChatModel) -> dict:
     if state.database_schema is None:
         raise ValidationError("Database schema not available", "database_schema")
 
-    messages = format_dictionary_prompt(state.database_schema)
+    # Sanitize schema for safe inclusion in prompt
+    safe_schema = sanitize_for_prompt(
+        json.dumps(state.database_schema.model_dump(), indent=2)
+    )
+    messages = format_dictionary_prompt(safe_schema)
 
     parser = JsonOutputParser(pydantic_object=list[DataDictionaryEntry])
 
