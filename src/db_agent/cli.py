@@ -55,8 +55,8 @@ def _validate_provider_config(provider: LLMProvider, settings: Settings) -> None
 @app.command()
 def design(
     context: str = typer.Argument(..., help="Business context description"),
-    provider: LLMProvider = typer.Option(
-        LLMProvider.GROQ, "--provider", "-p", help="LLM provider"
+    provider: LLMProvider | None = typer.Option(
+        None, "--provider", "-p", help="LLM provider (overrides config)"
     ),
     model: str | None = typer.Option(
         None, "--model", "-m", help="Model name (uses provider default if not specified)"
@@ -76,16 +76,13 @@ def design(
 ) -> None:
     """Design database schema from business context."""
     try:
-        settings = get_settings()
-        if config_file:
-            # Note: pydantic-settings doesn't support dynamic env_file override easily
-            # User should set DB_AGENT_* env vars or use .env in cwd
-            pass
+        settings = get_settings(config_file)
 
-        if model:
+        # Override provider/model from CLI if provided
+        if provider or model:
             settings = Settings(
-                llm_provider=provider,
-                llm_model=model,
+                llm_provider=provider or settings.llm_provider,
+                llm_model=model or settings.llm_model,
                 groq_api_key=settings.groq_api_key,
                 openai_api_key=settings.openai_api_key,
                 anthropic_api_key=settings.anthropic_api_key,
@@ -94,11 +91,13 @@ def design(
                 chroma_persist_dir=settings.chroma_persist_dir,
                 log_level=settings.log_level,
                 output_dir=output_dir,
+                _env_file=config_file,
             )
 
-        _validate_provider_config(provider, settings)
+        # Validate using settings.llm_provider (not CLI option)
+        _validate_provider_config(settings.llm_provider, settings)
 
-        console.print(f"[bold]Provider:[/bold] {provider.value}")
+        console.print(f"[bold]Provider:[/bold] {settings.llm_provider.value}")
         console.print(f"[bold]Model:[/bold] {settings.llm_model}")
         console.print(f"[bold]Context:[/bold] {context[:100]}{'...' if len(context) > 100 else ''}")
 
@@ -181,7 +180,7 @@ def _run_config_wizard() -> None:
     provider = Prompt.ask(
         "Select LLM provider",
         choices=provider_choices,
-        default="groq",
+        default="ollama",
     )
 
     settings = get_settings()
@@ -189,8 +188,6 @@ def _run_config_wizard() -> None:
     model = Prompt.ask("Model name", default=default_model)
 
     env_lines = []
-    env_path = Path.home() / ".config" / "db-design-agent" / ".env"
-    env_path.parent.mkdir(parents=True, exist_ok=True)
 
     if provider == "groq":
         api_key = Prompt.ask("GROQ API Key (get free at console.groq.com)", password=True)
@@ -208,14 +205,25 @@ def _run_config_wizard() -> None:
     env_lines.append(f"DB_AGENT_LLM_PROVIDER={provider}")
     env_lines.append(f"DB_AGENT_LLM_MODEL={model}")
 
-    if env_path.exists():
-        existing = env_path.read_text(encoding="utf-8").strip()
+    # Write to BOTH locations: project .env (priority) and user config
+    project_env = Path.cwd() / ".env"
+    user_env = Path.home() / ".config" / "db-design-agent" / ".env"
+    user_env.parent.mkdir(parents=True, exist_ok=True)
+
+    # Read existing project .env if exists
+    if project_env.exists():
+        existing = project_env.read_text(encoding="utf-8").strip()
         if existing:
             env_lines.insert(0, existing)
 
-    env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
-    console.print(f"\n[green]Configuration saved to {env_path}[/green]")
-    console.print("[yellow]Restart the application for changes to take effect.[/yellow]")
+    project_env.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+    console.print(f"\n[green]Configuration saved to {project_env}[/green]")
+
+    # Also save to user config directory
+    user_env.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+    console.print(f"[green]Configuration also saved to {user_env}[/green]")
+
+    console.print("\n[yellow]Settings will be picked up automatically on next run.[/yellow]")
 
 
 @app.command()
