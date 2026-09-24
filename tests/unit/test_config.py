@@ -34,7 +34,7 @@ def test_settings_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_settings_immutable() -> None:
     """Test settings are frozen/immutable."""
     settings = Settings()
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         settings.llm_provider = LLMProvider.OLLAMA
 
 

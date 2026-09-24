@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from db_agent.graph import build_graph, run_agent
 from db_agent.config import LLMProvider, Settings
-from db_agent.graph import run_agent
 from db_agent.models import (
     AgentState,
     DatabaseSchema,
@@ -125,7 +125,6 @@ async def test_build_graph(mock_embeddings: MagicMock, tmp_path: pytest.TempPath
         output_dir=tmp_path / "output",
     )
     with patch("db_agent.graph.create_embeddings", return_value=mock_embeddings):
-        from db_agent.graph import build_graph
         graph = build_graph(test_settings, tmp_path)
         assert graph is not None
 
@@ -166,7 +165,7 @@ async def test_run_agent_with_mock(
     assert state.database_schema is not None
     assert len(state.database_schema.tables) == 1
     assert state.database_schema.tables[0].name == "users"
-    assert len(state.data_dictionary) == 2
+    assert len(state.data_dictionary) == 2  # noqa: PLR2004
     assert "CREATE TABLE users" in state.sql_ddl
 
 
@@ -189,6 +188,6 @@ def test_database_schema_model_validation() -> None:
 def test_data_dictionary_model_validation() -> None:
     """Test DataDictionaryEntry model validates correctly."""
     entries = [DataDictionaryEntry.model_validate(d) for d in SAMPLE_DICTIONARY]
-    assert len(entries) == 2
+    assert len(entries) == 2  # noqa: PLR2004
     assert entries[0].table == "users"
     assert entries[1].column == "email"

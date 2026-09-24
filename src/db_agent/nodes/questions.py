@@ -1,23 +1,21 @@
 """Question generation and processing nodes for interactive mode."""
 
-import json
-from typing import Any
-
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
 
+from ..constants import MAX_ROUNDS
+from ..exceptions import ValidationError, ValidationErrorCodes
 from ..models import AgentState
 from ..prompts import (
-    format_questions_prompt,
     format_answer_processing_prompt,
+    format_questions_prompt,
     format_readiness_prompt,
 )
-from ..exceptions import ValidationError
 
 
 def generate_questions_node(state: AgentState, llm: BaseChatModel) -> dict:
     """Generate clarifying questions for the current round."""
-    if state.clarification_round >= 3:
+    if state.clarification_round >= MAX_ROUNDS:
         return {"is_ready": True}
 
     if state.clarification_round == 0:
@@ -38,14 +36,14 @@ def generate_questions_node(state: AgentState, llm: BaseChatModel) -> dict:
         chain = llm | parser
         result = chain.invoke(messages)
     except Exception as e:
-        raise ValidationError(f"Failed to parse questions output: {e}") from e
+        raise ValidationError(ValidationErrorCodes.SQL_PARSE_FAILED) from e
 
     if not isinstance(result, list):
-        raise ValidationError("Questions output must be a list")
+        raise ValidationError(ValidationErrorCodes.SQL_PARSE_FAILED)
 
     # Validate each question
     validated_questions = []
-    for i, q in enumerate(result):
+    for _i, q in enumerate(result):
         if not isinstance(q, dict):
             continue
         required_fields = ["id", "type", "question", "reasoning"]
@@ -58,7 +56,7 @@ def generate_questions_node(state: AgentState, llm: BaseChatModel) -> dict:
         validated_questions.append(q)
 
     if not validated_questions:
-        raise ValidationError("No valid questions generated")
+        raise ValidationError(ValidationErrorCodes.SQL_PARSE_FAILED)
 
     return {"pending_questions": validated_questions}
 
@@ -66,7 +64,7 @@ def generate_questions_node(state: AgentState, llm: BaseChatModel) -> dict:
 def process_answers_node(state: AgentState, llm: BaseChatModel) -> dict:
     """Process user answers and generate enriched context."""
     if not state.pending_questions:
-        raise ValidationError("No pending questions to process")
+        raise ValidationError(ValidationErrorCodes.SQL_PARSE_FAILED)
 
     # The answers should be in the conversation_history from CLI
     # The last N entries in conversation_history are the answers
@@ -89,7 +87,7 @@ def process_answers_node(state: AgentState, llm: BaseChatModel) -> dict:
             })
 
     if not answers:
-        raise ValidationError("No answers found for pending questions")
+        raise ValidationError(ValidationErrorCodes.SQL_PARSE_FAILED)
 
     # Build QA pairs for the prompt
     qa_pairs = []
@@ -101,8 +99,6 @@ def process_answers_node(state: AgentState, llm: BaseChatModel) -> dict:
         })
 
     # Determine context to enrich
-    base_context = state.enriched_context or state.business_context
-
     messages = format_answer_processing_prompt(
         context=state.business_context,
         qa_pairs=qa_pairs,
@@ -113,7 +109,7 @@ def process_answers_node(state: AgentState, llm: BaseChatModel) -> dict:
         response = llm.invoke(messages)
         enriched_context = response.content if hasattr(response, "content") else str(response)
     except Exception as e:
-        raise ValidationError(f"Failed to generate enriched context: {e}") from e
+        raise ValidationError("Failed to generate enriched context") from e
 
     if not enriched_context or not enriched_context.strip():
         raise ValidationError("Empty enriched context")
@@ -151,16 +147,16 @@ def check_readiness_node(state: AgentState, llm: BaseChatModel) -> dict:
         chain = llm | parser
         result = chain.invoke(messages)
     except Exception as e:
-        raise ValidationError(f"Failed to parse readiness output: {e}") from e
+        raise ValidationError("Failed to parse readiness output") from e
 
     if not isinstance(result, dict):
         raise ValidationError("Readiness output must be a dict")
 
     is_ready = result.get("is_ready", False)
-    reasoning = result.get("reasoning", "")
+    reasoning = result.get("reasoning", "")  # Used in logging if needed
 
-    # Force ready after 3 rounds
-    if state.clarification_round >= 3:
+    # Force ready after max rounds
+    if state.clarification_round >= MAX_ROUNDS:
         is_ready = True
 
     return {"is_ready": is_ready}

@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 from typing import Literal
 
+from .constants import DEFAULT_PATTERN_TRUNCATE_LENGTH
 from .models import AgentState, DatabaseSchema, DataDictionaryEntry
+from rich.console import Console
+
+console = Console()
 
 OutputFormat = Literal["json", "sql", "md", "all"]
 
@@ -70,28 +74,28 @@ def save_outputs(
 
 def print_results(state: AgentState, verbose: bool = False) -> None:
     """Print results to stdout."""
-    print("=" * 60)
-    print("DATABASE SCHEMA")
-    print("=" * 60)
+    console.print("=" * 60)
+    console.print("DATABASE SCHEMA")
+    console.print("=" * 60)
     if state.database_schema:
-        print(format_schema_json(state.database_schema))
+        console.print(format_schema_json(state.database_schema))
     else:
-        print("No schema generated")
+        console.print("No schema generated")
 
-    print("\n" + "=" * 60)
-    print("DATA DICTIONARY")
-    print("=" * 60)
-    print(format_dictionary_md(state.data_dictionary))
+    console.print("\n" + "=" * 60)
+    console.print("DATA DICTIONARY")
+    console.print("=" * 60)
+    console.print(format_dictionary_md(state.data_dictionary))
 
-    print("\n" + "=" * 60)
-    print("SQL DDL (PostgreSQL)")
-    print("=" * 60)
-    print(state.sql_ddl or "No DDL generated")
+    console.print("\n" + "=" * 60)
+    console.print("SQL DDL (PostgreSQL)")
+    console.print("=" * 60)
+    console.print(state.sql_ddl or "No DDL generated")
 
     if verbose:
-        print("\n" + "=" * 60)
-        print("RELEVANT PATTERNS")
-        print("=" * 60)
+        console.print("\n" + "=" * 60)
+        console.print("RELEVANT PATTERNS")
+        console.print("=" * 60)
         for i, pattern in enumerate(state.relevant_patterns, 1):
-            print(f"\n--- Pattern {i} ---")
-            print(pattern[:500] + ("..." if len(pattern) > 500 else ""))
+            console.print(f"\n--- Pattern {i} ---")
+            console.print(pattern[:DEFAULT_PATTERN_TRUNCATE_LENGTH] + ("..." if len(pattern) > DEFAULT_PATTERN_TRUNCATE_LENGTH else ""))

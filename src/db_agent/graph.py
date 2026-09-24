@@ -7,18 +7,20 @@ from langchain_chroma import Chroma
 from langgraph.graph import END, StateGraph
 
 from .config import Settings
+from .constants import MAX_ROUNDS
 from .knowledge import create_vectorstore, ensure_knowledge_loaded
 from .llm import create_chat_model, create_embeddings
 from .models import AgentState
 from .nodes import (
+    check_readiness_node,
     ddl_node,
     design_node,
     dictionary_node,
-    retrieve_node,
     generate_questions_node,
     process_answers_node,
-    check_readiness_node,
+    retrieve_node,
 )
+from .security import validate_context_input
 
 
 def _build_vectorstore(settings: Settings, cwd: Path) -> Chroma:
@@ -32,7 +34,7 @@ def _build_vectorstore(settings: Settings, cwd: Path) -> Chroma:
 
 def _should_continue_questions(state: AgentState) -> str:
     """Determine next node after question generation."""
-    if state.is_ready or state.clarification_round >= 3:
+    if state.is_ready or state.clarification_round >= MAX_ROUNDS:
         return "design"
     return "wait_for_answers"
 
@@ -98,13 +100,11 @@ async def run_agent(
     context: str,
     settings: Settings,
     cwd: Path | None = None,
-    interactive: bool = False,
 ) -> AgentState:
     """Run the agent with given context and settings."""
     if cwd is None:
         cwd = Path.cwd()
 
-    from .security import validate_context_input
     validated_context = validate_context_input(context)
 
     graph = build_graph(settings, cwd)

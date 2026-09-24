@@ -1,12 +1,12 @@
-"""Prompt templates for the database design agent."""
+"""Prompt templates for the database design agent."""  # noqa: E501
 
 import json
 
 from .models import DatabaseSchema
 
-DESIGN_SYSTEM_PROMPT = """You are an expert database architect. Design a complete relational database schema based on the business context and reference patterns.
+DESIGN_SYSTEM_PROMPT = """You are an expert database architect. Design a complete relational database schema based on the business context and reference patterns.  # noqa: E501
 
-Return ONLY valid JSON matching the exact structure specified. No additional text, no markdown, no explanations."""
+Return ONLY valid JSON matching the exact structure specified. No additional text, no markdown, no explanations."""  # noqa: E501
 
 DESIGN_USER_PROMPT = """BUSINESS CONTEXT:
 {context}
@@ -64,7 +64,7 @@ RETURN JSON WITH THIS EXACT STRUCTURE:
 
 DICTIONARY_SYSTEM_PROMPT = """You are a data dictionary generator. Create a technical-business data dictionary for the given database schema.
 
-Return ONLY valid JSON array of objects. No additional text."""
+Return ONLY valid JSON array of objects. No additional text."""  # noqa: E501
 
 DICTIONARY_USER_PROMPT = """DATABASE SCHEMA:
 {schema}
@@ -82,7 +82,7 @@ Return as JSON array."""
 
 DDL_SYSTEM_PROMPT = """You are a PostgreSQL DDL generator. Generate complete, production-ready SQL DDL for the given schema.
 
-Return ONLY the SQL statements. No markdown, no explanations, no additional text."""
+Return ONLY the SQL statements. No markdown, no explanations, no additional text."""  # noqa: E501
 
 DDL_USER_PROMPT = """DATABASE SCHEMA:
 {schema}
@@ -151,7 +151,7 @@ REFERENCE PATTERNS:
 
 CURRENT ROUND: {round_number} of 3
 
-Generate 3-4 clarifying questions for this round. Return ONLY the JSON array."""
+Generate 3-4 clarifying questions for this round. Return ONLY the JSON array."""  # noqa: E501
 
 
 ANSWER_PROCESSING_SYSTEM_PROMPT = """You are an expert database architect. Process the user's answers to clarifying questions and produce an enriched business context that incorporates all the information gathered.

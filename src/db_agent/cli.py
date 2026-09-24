@@ -1,6 +1,8 @@
 """CLI for db-design-agent."""
 
-import sys
+import asyncio
+import httpx
+import traceback
 import time
 from collections import deque
 from pathlib import Path
@@ -10,9 +12,27 @@ from rich.console import Console
 from rich.prompt import Prompt
 from rich.table import Table
 
+from . import __version__
+from .constants import DEFAULT_MAX_CONTEXT_PREVIEW, DEFAULT_OLLAMA_MODELS_DISPLAY
 from .config import LLMProvider, Settings, get_settings
 from .exceptions import AgentError, ConfigurationError
 from .graph import run_agent, build_graph
+from .models import AgentState
+from .nodes import (
+    check_readiness_node,
+    ddl_node,
+    design_node,
+    dictionary_node,
+    generate_questions_node,
+    process_answers_node,
+    retrieve_node,
+)
+from .output import OutputFormat, print_results, save_outputs
+from .knowledge import ensure_knowledge_loaded
+from .llm import create_chat_model, create_embeddings
+from .config import LLMProvider, Settings, get_settings
+from .exceptions import AgentError, ConfigurationError
+from .graph import run_agent
 from .models import AgentState
 from .output import OutputFormat, print_results, save_outputs
 
@@ -61,17 +81,6 @@ def _get_format_list(format_str: str) -> list[OutputFormat]:
 
 def _run_interactive_design(context: str, settings: Settings, console: Console) -> "AgentState":
     """Run the design process in interactive mode with human-in-the-loop."""
-    import asyncio
-    from rich.prompt import Prompt
-
-    from .graph import build_graph
-    from .models import AgentState
-    from .llm import create_chat_model, create_embeddings
-    from .knowledge import create_vectorstore, ensure_knowledge_loaded
-    from langchain_chroma import Chroma
-    from pathlib import Path
-    from .nodes import retrieve_node, generate_questions_node, process_answers_node, check_readiness_node, design_node, dictionary_node, ddl_node
-
     console.print("\n[bold cyan]🔄 Interactive Mode Enabled[/bold cyan]")
     console.print("The agent will ask up to 3 rounds of clarifying questions.")
     console.print("Answer each question. Write 'N/A' if a question doesn't apply.\n")
@@ -85,7 +94,6 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
         embedding_function=embeddings,
         collection_name="db_design_patterns",
     )
-    from .knowledge import ensure_knowledge_loaded
     ensure_knowledge_loaded(vectorstore)
 
     # Initial state
@@ -104,7 +112,6 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
 
     # Run retrieve
     console.print("[bold]Step 1:[/bold] Retrieving relevant patterns...")
-    from .nodes import retrieve_node
     state = retrieve_node(state, vectorstore)
 
     # Interactive loop: generate questions -> get answers -> process -> check readiness
@@ -113,7 +120,6 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
     while state["clarification_round"] < max_rounds and not state.get("is_ready", False):
         # Generate questions
         console.print(f"\n[bold]Round {state['clarification_round'] + 1} of 3:[/bold] Generating questions...")
-        from .nodes import generate_questions_node
         llm = create_chat_model(settings)
         question_result = generate_questions_node(state, llm)
         state.update(question_result)
@@ -136,7 +142,7 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
 
             # Get answer
             while True:
-                answer = Prompt.ask(f"[bold]Your answer[/bold]").strip()
+                answer = Prompt.ask("[bold]Your answer[/bold]").strip()
                 if answer:
                     break
                 console.print("[yellow]Answer cannot be empty. Write 'N/A' if not applicable.[/yellow]")
@@ -151,14 +157,12 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
 
         # Process answers
         console.print("\n[bold]Processing answers...[/bold]")
-        from .nodes import process_answers_node
         llm = create_chat_model(settings)
         answer_result = process_answers_node(state, llm)
         state.update(answer_result)
 
         # Check readiness
         console.print("[bold]Checking if ready to design...[/bold]")
-        from .nodes import check_readiness_node
         readiness_result = check_readiness_node(state, llm)
         state.update(readiness_result)
 
@@ -175,7 +179,6 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
 
     # Now run the rest of the graph: design -> dictionary -> ddl
     console.print("\n[bold]Generating database schema...[/bold]")
-    from .nodes import design_node, dictionary_node, ddl_node
     llm = create_chat_model(settings)
 
     state = design_node(state, llm)
@@ -188,20 +191,11 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
 def _validate_provider_config(provider: LLMProvider, settings: Settings) -> None:
     """Validate that required configuration exists for provider."""
     if provider == LLMProvider.GROQ and not settings.groq_api_key:
-        raise ConfigurationError(
-            "GROQ_API_KEY required for Groq provider. "
-            "Set DB_AGENT_GROQ_API_KEY in environment or .env file."
-        )
+        raise ConfigurationError("GROQ_API_KEY required")  # noqa: TRY003
     if provider == LLMProvider.OPENAI and not settings.openai_api_key:
-        raise ConfigurationError(
-            "OPENAI_API_KEY required for OpenAI provider. "
-            "Set DB_AGENT_OPENAI_API_KEY in environment or .env file."
-        )
+        raise ConfigurationError("OPENAI_API_KEY required")  # noqa: TRY003
     if provider == LLMProvider.ANTHROPIC and not settings.anthropic_api_key:
-        raise ConfigurationError(
-            "ANTHROPIC_API_KEY required for Anthropic provider. "
-            "Set DB_AGENT_ANTHROPIC_API_KEY in environment or .env file."
-        )
+        raise ConfigurationError("ANTHROPIC_API_KEY required")  # noqa: TRY003
     if provider == LLMProvider.OLLAMA:
         pass
 
@@ -259,13 +253,12 @@ def design(
 
         console.print(f"[bold]Provider:[/bold] {settings.llm_provider.value}")
         console.print(f"[bold]Model:[/bold] {settings.llm_model}")
-        console.print(f"[bold]Context:[/bold] {context[:100]}{'...' if len(context) > 100 else ''}")
+        console.print(f"[bold]Context:[/bold] {context[:DEFAULT_MAX_CONTEXT_PREVIEW]}{'...' if len(context) > DEFAULT_MAX_CONTEXT_PREVIEW else ''}")
 
         if interactive:
             state = _run_interactive_design(context, settings, console)
         else:
             with console.status("[bold green]Analyzing and designing...[/bold green]"):
-                import asyncio
                 state = asyncio.run(run_agent(context, settings))
 
         print_results(state, verbose)
@@ -288,7 +281,6 @@ def design(
     except Exception as e:
         err_console.print(f"[bold red]Unexpected error:[/bold red] {e}")
         if verbose:
-            import traceback
             err_console.print(traceback.format_exc())
         sys.exit(1)
 
@@ -409,7 +401,6 @@ def doctor(
     # Ollama check
     if settings.llm_provider == LLMProvider.OLLAMA or settings.embedding_provider.value == "ollama":
         try:
-            import httpx
             response = httpx.get(
                 str(settings.ollama_base_url) + "/api/tags",
                 timeout=5.0,
@@ -420,7 +411,7 @@ def doctor(
                 model_names = [m["name"] for m in models]
                 checks.append(("Ollama", "OK", f"Running, {len(models)} models available"))
                 if verbose:
-                    checks.append(("", "", f"Models: {', '.join(model_names[:5])}{'...' if len(model_names) > 5 else ''}"))
+                    checks.append(("", "", f"Models: {', '.join(model_names[:DEFAULT_OLLAMA_MODELS_DISPLAY])}{'...' if len(model_names) > DEFAULT_OLLAMA_MODELS_DISPLAY else ''}"))
             else:
                 checks.append(("Ollama", "WARN", f"HTTP {response.status_code}"))
         except Exception as e:
@@ -483,7 +474,6 @@ def doctor(
 @app.command()
 def version() -> None:
     """Show version information."""
-    from . import __version__
     console.print(f"db-design-agent version {__version__}")
 
 

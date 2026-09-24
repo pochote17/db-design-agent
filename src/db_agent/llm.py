@@ -5,6 +5,31 @@ from typing import Protocol
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 
+try:
+    from langchain_groq import ChatGroq
+except ImportError:  # pragma: no cover
+    ChatGroq = None  # type: ignore
+
+try:
+    from langchain_ollama import ChatOllama
+except ImportError:  # pragma: no cover
+    ChatOllama = None  # type: ignore
+
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:  # pragma: no cover
+    ChatOpenAI = None  # type: ignore
+
+try:
+    from langchain_anthropic import ChatAnthropic
+except ImportError:  # pragma: no cover
+    ChatAnthropic = None  # type: ignore
+
+try:
+    from langchain_ollama import OllamaEmbeddings
+except ImportError:  # pragma: no cover
+    OllamaEmbeddings = None  # type: ignore
+
 from .config import EmbeddingProvider, LLMProvider, Settings
 from .exceptions import ConfigurationError, LLMProviderError
 
@@ -25,12 +50,10 @@ class GroqChatFactory:
     """Factory for Groq chat models."""
 
     def create_chat(self, settings: Settings) -> BaseChatModel:
-        try:
-            from langchain_groq import ChatGroq
-        except ImportError as e:
+        if ChatGroq is None:
             raise ConfigurationError(
                 "langchain-groq not installed. Install with: pip install db-design-agent[groq]"
-            ) from e
+            )
 
         if not settings.groq_api_key:
             raise ConfigurationError("GROQ_API_KEY is required for Groq provider")
@@ -46,7 +69,10 @@ class OllamaChatFactory:
     """Factory for Ollama chat models."""
 
     def create_chat(self, settings: Settings) -> BaseChatModel:
-        from langchain_ollama import ChatOllama
+        if ChatOllama is None:
+            raise ConfigurationError(
+                "langchain-ollama not installed. Install with: pip install db-design-agent[ollama]"
+            )
 
         return ChatOllama(
             model=settings.llm_model,
@@ -59,12 +85,10 @@ class OpenAIChatFactory:
     """Factory for OpenAI chat models."""
 
     def create_chat(self, settings: Settings) -> BaseChatModel:
-        try:
-            from langchain_openai import ChatOpenAI
-        except ImportError as e:
+        if ChatOpenAI is None:
             raise ConfigurationError(
                 "langchain-openai not installed. Install with: pip install db-design-agent[openai]"
-            ) from e
+            )
 
         if not settings.openai_api_key:
             raise ConfigurationError("OPENAI_API_KEY is required for OpenAI provider")
@@ -80,12 +104,10 @@ class AnthropicChatFactory:
     """Factory for Anthropic chat models."""
 
     def create_chat(self, settings: Settings) -> BaseChatModel:
-        try:
-            from langchain_anthropic import ChatAnthropic
-        except ImportError as e:
+        if ChatAnthropic is None:
             raise ConfigurationError(
                 "langchain-anthropic not installed. Install with: pip install db-design-agent[anthropic]"
-            ) from e
+            )
 
         if not settings.anthropic_api_key:
             raise ConfigurationError("ANTHROPIC_API_KEY is required for Anthropic provider")
@@ -101,7 +123,10 @@ class OllamaEmbeddingsFactory:
     """Factory for Ollama embeddings."""
 
     def create_embeddings(self, settings: Settings) -> Embeddings:
-        from langchain_ollama import OllamaEmbeddings
+        if OllamaEmbeddings is None:
+            raise ConfigurationError(
+                "langchain-ollama not installed. Install with: pip install db-design-agent[ollama]"
+            )
 
         return OllamaEmbeddings(
             model=settings.embedding_model,

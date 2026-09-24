@@ -4,16 +4,16 @@ import logging
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
+from .constants import DEFAULT_CONTROL_CHAR_THRESHOLD
 import sqlparse
-from sqlparse.tokens import DDL, DML, Keyword
 
-from .exceptions import ValidationError
+from .exceptions import ValidationError, ValidationErrorCodes
 
 
 class SecurityEventType(str, Enum):
     """Types of security events."""
+
     PROMPT_INJECTION = "prompt_injection"
     SQL_INJECTION = "sql_injection"
     INPUT_VALIDATION = "input_validation"
@@ -88,24 +88,23 @@ _PROMPT_INJECTION_REGEX = [re.compile(p, re.IGNORECASE) for p in PROMPT_INJECTIO
 _FORBIDDEN_SQL_REGEX = [re.compile(p, re.IGNORECASE) for p in FORBIDDEN_SQL_PATTERNS]
 
 # Allowed SQL statement types for generated DDL
-ALLOWED_DDL_STATEMENTS = {
+ALLOWED_DDL_STATEMENTS = frozenset({
     "CREATE TABLE",
     "CREATE INDEX",
     "CREATE UNIQUE INDEX",
     "COMMENT ON",
     "ALTER TABLE",
-    # Only ALTER TABLE with ADD CONSTRAINT, ADD COLUMN, ALTER COLUMN
-}
+})
 
 # Maximum input lengths
-MAX_CONTEXT_LENGTH = 10000
-MAX_QUERY_LENGTH = 1000
+CONTROL_CHAR_THRESHOLD = 32
+PREVIEW_LENGTH = 200
 
 
 class SecurityLogger:
     """Audit logger for security events."""
 
-    _instance: Optional["SecurityLogger"] = None
+    _instance: "SecurityLogger | None" = None
     _logger: logging.Logger | None = None
 
     def __new__(cls) -> "SecurityLogger":
@@ -161,7 +160,7 @@ def get_security_logger() -> SecurityLogger:
     return _security_logger
 
 
-def sanitize_user_input(text: str, max_length: int = MAX_CONTEXT_LENGTH) -> str:
+def sanitize_user_input(text: str, max_length: int = 10000) -> str:
     """Sanitize user input: strip control chars, limit length, normalize whitespace."""
     if not text:
         return ""
@@ -169,7 +168,7 @@ def sanitize_user_input(text: str, max_length: int = MAX_CONTEXT_LENGTH) -> str:
     # Remove null bytes and control characters except newline/tab
     text = "".join(
         ch for ch in text
-        if ch == "\n" or ch == "\t" or ch == "\r" or ord(ch) >= 32
+        if ch in {"\n", "\t", "\r"} or ord(ch) >= DEFAULT_CONTROL_CHAR_THRESHOLD
     )
 
     # Normalize whitespace
@@ -205,7 +204,7 @@ def validate_no_prompt_injection(text: str, field_name: str = "input") -> None:
             input_sample=text,
         )
         raise ValidationError(
-            f"Potential prompt injection detected in {field_name}",
+            ValidationErrorCodes.PROMPT_INJECTION_DETECTED,
             field=field_name,
         )
 
@@ -214,7 +213,7 @@ def validate_input_length(text: str, field_name: str, max_length: int) -> None:
     """Validate input length."""
     if len(text) > max_length:
         raise ValidationError(
-            f"{field_name} exceeds maximum length of {max_length} characters",
+            ValidationErrorCodes.INPUT_TOO_LONG,
             field=field_name,
         )
 
@@ -226,7 +225,7 @@ def validate_ddl_output(sql: str) -> str:
     Raises ValidationError if invalid.
     """
     if not sql or not sql.strip():
-        raise ValidationError("Empty DDL output")
+        raise ValidationError(ValidationErrorCodes.EMPTY_DDL_OUTPUT)
 
     # Clean up markdown code fences
     sql_clean = sql.strip()
@@ -248,7 +247,7 @@ def validate_ddl_output(sql: str) -> str:
                 input_sample=sql_clean,
             )
             raise ValidationError(
-                f"Forbidden SQL pattern detected: {pattern_regex.pattern}",
+                ValidationErrorCodes.FORBIDDEN_SQL_PATTERN,
                 field="sql_ddl",
             )
 
@@ -256,7 +255,7 @@ def validate_ddl_output(sql: str) -> str:
     try:
         parsed = sqlparse.parse(sql_clean)
     except Exception as e:
-        raise ValidationError(f"Failed to parse SQL: {e}")
+        raise ValidationError(ValidationErrorCodes.SQL_PARSE_FAILED) from e
 
     for statement in parsed:
         if not statement.tokens:
@@ -264,11 +263,6 @@ def validate_ddl_output(sql: str) -> str:
 
         # Get statement type
         stmt_type = statement.get_type()
-        first_token = None
-        for token in statement.flatten():
-            if token.ttype is not None and token.ttype in (Keyword, DDL, DML):
-                first_token = token.value.upper()
-                break
 
         # Check if statement type is allowed
         stmt_upper = stmt_type.upper() if stmt_type else ""
@@ -281,7 +275,7 @@ def validate_ddl_output(sql: str) -> str:
                     input_sample=str(statement)[:200],
                 )
                 raise ValidationError(
-                    f"Disallowed SQL statement type: {stmt_type}",
+                    ValidationErrorCodes.DISALLOWED_SQL_STATEMENT,
                     field="sql_ddl",
                 )
 
@@ -295,7 +289,7 @@ def validate_ddl_output(sql: str) -> str:
                     input_sample=str(statement)[:200],
                 )
                 raise ValidationError(
-                    "Disallowed ALTER TABLE operation (only ADD CONSTRAINT/COLUMN allowed)",
+                    ValidationErrorCodes.DISALLOWED_ALTER_TABLE,
                     field="sql_ddl",
                 )
 
@@ -316,7 +310,7 @@ def validate_query_input(query: str) -> str:
     if not query or not query.strip():
         return ""
 
-    query = sanitize_user_input(query, MAX_QUERY_LENGTH)
+    query = sanitize_user_input(query, 1000)
     validate_no_prompt_injection(query, "query")
     return query
 
@@ -324,8 +318,8 @@ def validate_query_input(query: str) -> str:
 def validate_context_input(context: str) -> str:
     """Validate and sanitize business context input."""
     if not context or not context.strip():
-        raise ValidationError("Business context cannot be empty", "business_context")
+        raise ValidationError(ValidationErrorCodes.EMPTY_CONTEXT, "business_context")
 
-    context = sanitize_user_input(context, MAX_CONTEXT_LENGTH)
+    context = sanitize_user_input(context, 10000)
     validate_no_prompt_injection(context, "business_context")
     return context

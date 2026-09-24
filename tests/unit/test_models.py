@@ -59,7 +59,7 @@ def test_table_with_columns() -> None:
         ],
         description="User accounts",
     )
-    assert len(table.columns) == 3
+    assert len(table.columns) == 3  # noqa: PLR2004
     assert table.columns[0].primary_key is True
     assert table.columns[1].nullable is False
 
@@ -78,7 +78,7 @@ def test_relationship_cardinality() -> None:
 
 def test_relationship_invalid_cardinality() -> None:
     """Test invalid cardinality raises error."""
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError):
         Relationship(
             source_table="orders",
             source_column="user_id",
@@ -117,7 +117,7 @@ def test_database_schema() -> None:
             ),
         ],
     )
-    assert len(schema.tables) == 2
+    assert len(schema.tables) == 2  # noqa: PLR2004
     assert len(schema.relationships) == 1
 
 

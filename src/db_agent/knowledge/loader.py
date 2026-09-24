@@ -6,6 +6,7 @@ from langchain_chroma import Chroma
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+from ..security import validate_query_input
 from ..exceptions import KnowledgeBaseError
 
 _PATTERNS_CONTENT = """# Database Design Patterns
@@ -119,7 +120,6 @@ def ensure_knowledge_loaded(vectorstore: Chroma) -> int:
 
 def retrieve_patterns(vectorstore: Chroma, query: str, k: int = 5) -> list[str]:
     """Retrieve relevant patterns for a query."""
-    from ..security import validate_query_input
     query = validate_query_input(query)
 
     if not query:

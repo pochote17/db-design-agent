@@ -3,8 +3,9 @@
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import HttpUrl, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from .constants import DEFAULT_MODELS
 
 
 class LLMProvider(StrEnum):
@@ -55,54 +56,49 @@ class Settings(BaseSettings):
     )
 
     # LLM Configuration
-    llm_provider: LLMProvider = LLMProvider.OLLAMA
+    llm_provider: str = "ollama"
     llm_model: str = "llama3.1:8b"
-    groq_api_key: SecretStr | None = None
-    openai_api_key: SecretStr | None = None
-    anthropic_api_key: SecretStr | None = None
-    ollama_base_url: HttpUrl = "http://localhost:11434"
+    groq_api_key: str | None = None
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    ollama_base_url: str = "http://localhost:11434"
 
     # Embeddings (Ollama only for v0.1)
-    embedding_provider: EmbeddingProvider = EmbeddingProvider.OLLAMA
+    embedding_provider: str = "ollama"
     embedding_model: str = "nomic-embed-text"
 
     # Vector Database
-    chroma_persist_dir: Path = Path("./chroma_db")
+    chroma_persist_dir: str = "./chroma_db"
 
     # Application
     log_level: str = "INFO"
-    output_dir: Path = Path("./output")
+    output_dir: str = "./output"
 
     # Default models per provider
     @property
-    def default_models(self) -> dict[LLMProvider, str]:
-        return {
-            LLMProvider.GROQ: "llama-3.1-70b-versatile",
-            LLMProvider.OLLAMA: "llama3.1:8b",
-            LLMProvider.OPENAI: "gpt-4o-mini",
-            LLMProvider.ANTHROPIC: "claude-3-haiku-20240307",
-        }
+    def default_models(self) -> dict[str, str]:
+        return DEFAULT_MODELS
 
-    def get_default_model(self, provider: LLMProvider) -> str:
+    def get_default_model(self, provider: str) -> str:
         """Get default model for a provider."""
-        return self.default_models.get(provider, "llama3.1:8b")
+        return DEFAULT_MODELS.get(provider, "llama3.1:8b")
 
-    def resolve_output_dir(self, cwd: Path) -> Path:
+    def resolve_output_dir(self, cwd) -> Path:
         """Resolve output directory relative to working directory."""
-        output_dir = self.output_dir
+        output_dir = Path(self.output_dir)
         if not output_dir.is_absolute():
             output_dir = cwd / output_dir
         return output_dir.resolve()
 
-    def resolve_chroma_dir(self, cwd: Path) -> Path:
+    def resolve_chroma_dir(self, cwd) -> Path:
         """Resolve ChromaDB directory relative to working directory."""
-        chroma_dir = self.chroma_persist_dir
+        chroma_dir = Path(self.chroma_persist_dir)
         if not chroma_dir.is_absolute():
             chroma_dir = cwd / chroma_dir
         return chroma_dir.resolve()
 
 
-def get_settings(env_file: Path | None = None) -> Settings:
+def get_settings(env_file: Path | None = None) -> "Settings":
     """Get settings instance with optional custom env file."""
     if env_file:
         return Settings(_env_file=env_file)

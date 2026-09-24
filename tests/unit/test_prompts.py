@@ -14,7 +14,7 @@ from db_agent.prompts import (
 def test_format_design_prompt() -> None:
     """Test design prompt formatting."""
     messages = format_design_prompt("Test context", "Test patterns")
-    assert len(messages) == 2
+    assert len(messages) == 2  # noqa: PLR2004
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert "Test context" in messages[1]["content"]
@@ -34,7 +34,7 @@ def test_format_dictionary_prompt() -> None:
         ]
     )
     messages = format_dictionary_prompt(schema)
-    assert len(messages) == 2
+    assert len(messages) == 2  # noqa: PLR2004
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert "users" in messages[1]["content"]
@@ -53,7 +53,7 @@ def test_format_ddl_prompt() -> None:
         ]
     )
     messages = format_ddl_prompt(schema)
-    assert len(messages) == 2
+    assert len(messages) == 2  # noqa: PLR2004
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert "users" in messages[1]["content"]
