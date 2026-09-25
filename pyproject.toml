@@ -24,8 +24,9 @@ dependencies = [
 groq = ["langchain-groq>=0.1"]
 openai = ["langchain-openai>=0.1"]
 anthropic = ["langchain-anthropic>=0.1"]
+cohere = ["langchain-cohere>=0.2"]
 dev = ["pytest>=8", "pytest-asyncio", "pytest-cov", "ruff>=0.5", "mypy>=1.10", "pre-commit>=3"]
-all = ["db-design-agent[groq,openai,anthropic,dev]"]
+all = ["db-design-agent[groq,openai,anthropic,cohere,dev]"]
 
 [project.scripts]
 db-design-agent = "db_agent.cli:app"

@@ -1,5 +1,7 @@
 """Constants for db-design-agent."""
 
+from pathlib import Path
+
 # Configuration defaults
 DEFAULT_MAX_CONTEXT_PREVIEW = 100
 DEFAULT_MAX_QUERY_LENGTH = 1000
@@ -28,6 +30,13 @@ DEFAULT_MODELS = {
     "anthropic": "claude-3-haiku-20240307",
 }
 
+# Default embedding models per provider
+DEFAULT_EMBEDDING_MODELS = {
+    "ollama": "nomic-embed-text",
+    "openai": "text-embedding-3-small",
+    "cohere": "embed-english-v3.0",
+}
+
 # Output formats
 VALID_OUTPUT_FORMATS = frozenset({"json", "sql", "md"})
 
@@ -37,3 +46,6 @@ DEFAULT_CHROMA_DIR = Path("./chroma_db")
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 DEFAULT_EMBEDDING_MODEL = "nomic-embed-text"
 DEFAULT_LOG_LEVEL = "INFO"
+
+# Max clarification rounds in interactive mode
+MAX_ROUNDS = 3

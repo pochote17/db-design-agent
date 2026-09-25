@@ -16,9 +16,10 @@ except ImportError:  # pragma: no cover
     ChatOllama = None  # type: ignore
 
 try:
-    from langchain_openai import ChatOpenAI
+    from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 except ImportError:  # pragma: no cover
     ChatOpenAI = None  # type: ignore
+    OpenAIEmbeddings = None  # type: ignore
 
 try:
     from langchain_anthropic import ChatAnthropic
@@ -29,6 +30,11 @@ try:
     from langchain_ollama import OllamaEmbeddings
 except ImportError:  # pragma: no cover
     OllamaEmbeddings = None  # type: ignore
+
+try:
+    from langchain_cohere import CohereEmbeddings
+except ImportError:  # pragma: no cover
+    CohereEmbeddings = None  # type: ignore
 
 from .config import EmbeddingProvider, LLMProvider, Settings
 from .exceptions import ConfigurationError, LLMProviderError
@@ -134,6 +140,42 @@ class OllamaEmbeddingsFactory:
         )
 
 
+class OpenAIEmbeddingsFactory:
+    """Factory for OpenAI embeddings."""
+
+    def create_embeddings(self, settings: Settings) -> Embeddings:
+        if OpenAIEmbeddings is None:
+            raise ConfigurationError(
+                "langchain-openai not installed. Install with: pip install db-design-agent[openai]"
+            )
+
+        if not settings.openai_api_key:
+            raise ConfigurationError("OPENAI_API_KEY is required for OpenAI embeddings")
+
+        return OpenAIEmbeddings(
+            model=settings.embedding_model,
+            api_key=settings.openai_api_key.get_secret_value(),
+        )
+
+
+class CohereEmbeddingsFactory:
+    """Factory for Cohere embeddings."""
+
+    def create_embeddings(self, settings: Settings) -> Embeddings:
+        if CohereEmbeddings is None:
+            raise ConfigurationError(
+                "langchain-cohere not installed. Install with: pip install db-design-agent[cohere]"
+            )
+
+        if not settings.cohere_api_key:
+            raise ConfigurationError("COHERE_API_KEY is required for Cohere embeddings")
+
+        return CohereEmbeddings(
+            model=settings.embedding_model,
+            cohere_api_key=settings.cohere_api_key.get_secret_value(),
+        )
+
+
 _CHAT_FACTORIES: dict[LLMProvider, ChatModelFactory] = {
     LLMProvider.GROQ: GroqChatFactory(),
     LLMProvider.OLLAMA: OllamaChatFactory(),
@@ -143,6 +185,8 @@ _CHAT_FACTORIES: dict[LLMProvider, ChatModelFactory] = {
 
 _EMBEDDINGS_FACTORIES: dict[EmbeddingProvider, EmbeddingsFactory] = {
     EmbeddingProvider.OLLAMA: OllamaEmbeddingsFactory(),
+    EmbeddingProvider.OPENAI: OpenAIEmbeddingsFactory(),
+    EmbeddingProvider.COHERE: CohereEmbeddingsFactory(),
 }
 
 

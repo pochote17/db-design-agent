@@ -1,6 +1,7 @@
 """CLI for db-design-agent."""
 
 import asyncio
+import sys
 import httpx
 import traceback
 import time
@@ -14,7 +15,7 @@ from rich.table import Table
 
 from . import __version__
 from .constants import DEFAULT_MAX_CONTEXT_PREVIEW, DEFAULT_OLLAMA_MODELS_DISPLAY
-from .config import LLMProvider, Settings, get_settings
+from .config import LLMProvider, EmbeddingProvider, Settings, get_settings
 from .exceptions import AgentError, ConfigurationError
 from .graph import run_agent, build_graph
 from .models import AgentState
@@ -30,11 +31,6 @@ from .nodes import (
 from .output import OutputFormat, print_results, save_outputs
 from .knowledge import ensure_knowledge_loaded
 from .llm import create_chat_model, create_embeddings
-from .config import LLMProvider, Settings, get_settings
-from .exceptions import AgentError, ConfigurationError
-from .graph import run_agent
-from .models import AgentState
-from .output import OutputFormat, print_results, save_outputs
 
 app = typer.Typer(
     name="db-design-agent",
@@ -199,6 +195,15 @@ def _validate_provider_config(provider: LLMProvider, settings: Settings) -> None
     if provider == LLMProvider.OLLAMA:
         pass
 
+    # Validate embedding provider
+    emb_provider = settings.embedding_provider
+    if emb_provider == EmbeddingProvider.OPENAI and not settings.openai_api_key:
+        raise ConfigurationError("OPENAI_API_KEY required for OpenAI embeddings")
+    if emb_provider == EmbeddingProvider.COHERE and not settings.cohere_api_key:
+        raise ConfigurationError("COHERE_API_KEY required for Cohere embeddings")
+    if emb_provider == EmbeddingProvider.OLLAMA:
+        pass
+
 
 @app.command()
 def design(
@@ -208,6 +213,12 @@ def design(
     ),
     model: str | None = typer.Option(
         None, "--model", "-m", help="Model name (uses provider default if not specified)"
+    ),
+    embedding_provider: EmbeddingProvider | None = typer.Option(
+        None, "--embedding-provider", "-ep", help="Embedding provider (overrides config)"
+    ),
+    embedding_model: str | None = typer.Option(
+        None, "--embedding-model", "-em", help="Embedding model name (uses provider default if not specified)"
     ),
     output_dir: Path = typer.Option(
         Path("./output"), "--output", "-o", help="Output directory"
@@ -233,18 +244,36 @@ def design(
         settings = get_settings(config_file)
 
         # Override provider/model from CLI if provided
-        if provider or model:
+        if provider or model or embedding_provider or embedding_model:
+            # Determine the providers to use
+            llm_prov = provider or settings.llm_provider
+            emb_prov = embedding_provider or settings.embedding_provider
+
+            # Use provider-specific default models if not explicitly provided
+            llm_mod = model or (
+                settings.get_default_model(llm_prov.value)
+                if provider
+                else settings.llm_model
+            )
+            emb_mod = embedding_model or (
+                settings.get_default_embedding_model(emb_prov.value)
+                if embedding_provider
+                else settings.embedding_model
+            )
+
             settings = Settings(
-                llm_provider=provider or settings.llm_provider,
-                llm_model=model or settings.llm_model,
+                llm_provider=llm_prov,
+                llm_model=llm_mod,
                 groq_api_key=settings.groq_api_key,
                 openai_api_key=settings.openai_api_key,
                 anthropic_api_key=settings.anthropic_api_key,
+                cohere_api_key=settings.cohere_api_key,
                 ollama_base_url=settings.ollama_base_url,
-                embedding_model=settings.embedding_model,
+                embedding_provider=emb_prov,
+                embedding_model=emb_mod,
                 chroma_persist_dir=settings.chroma_persist_dir,
                 log_level=settings.log_level,
-                output_dir=output_dir,
+                output_dir=str(output_dir),
                 _env_file=config_file,
             )
 
@@ -253,6 +282,8 @@ def design(
 
         console.print(f"[bold]Provider:[/bold] {settings.llm_provider.value}")
         console.print(f"[bold]Model:[/bold] {settings.llm_model}")
+        console.print(f"[bold]Embedding Provider:[/bold] {settings.embedding_provider.value}")
+        console.print(f"[bold]Embedding Model:[/bold] {settings.embedding_model}")
         console.print(f"[bold]Context:[/bold] {context[:DEFAULT_MAX_CONTEXT_PREVIEW]}{'...' if len(context) > DEFAULT_MAX_CONTEXT_PREVIEW else ''}")
 
         if interactive:
@@ -307,7 +338,9 @@ def config(
         table.add_row("Groq API Key", "***" if settings.groq_api_key else "Not set")
         table.add_row("OpenAI API Key", "***" if settings.openai_api_key else "Not set")
         table.add_row("Anthropic API Key", "***" if settings.anthropic_api_key else "Not set")
+        table.add_row("Cohere API Key", "***" if settings.cohere_api_key else "Not set")
         table.add_row("Ollama Base URL", str(settings.ollama_base_url))
+        table.add_row("Embedding Provider", settings.embedding_provider.value)
         table.add_row("Embedding Model", settings.embedding_model)
         table.add_row("ChromaDB Dir", str(settings.chroma_persist_dir))
         table.add_row("Output Dir", str(settings.output_dir))
@@ -342,6 +375,17 @@ def _run_config_wizard() -> None:
     default_model = settings.get_default_model(LLMProvider(provider))
     model = Prompt.ask("Model name", default=default_model)
 
+    # Embedding provider
+    emb_provider_choices = [p.value for p in EmbeddingProvider]
+    emb_provider = Prompt.ask(
+        "Select embedding provider",
+        choices=emb_provider_choices,
+        default="ollama",
+    )
+
+    default_emb_model = settings.get_default_embedding_model(emb_provider)
+    emb_model = Prompt.ask("Embedding model name", default=default_emb_model)
+
     env_lines = []
 
     if provider == "groq":
@@ -357,8 +401,20 @@ def _run_config_wizard() -> None:
         if api_key:
             env_lines.append(f"DB_AGENT_ANTHROPIC_API_KEY={api_key}")
 
+    # Embedding provider API keys
+    if emb_provider == "openai" and provider != "openai":
+        api_key = Prompt.ask("OpenAI API Key (for embeddings)", password=True)
+        if api_key:
+            env_lines.append(f"DB_AGENT_OPENAI_API_KEY={api_key}")
+    elif emb_provider == "cohere":
+        api_key = Prompt.ask("Cohere API Key (get free at dashboard.cohere.com)", password=True)
+        if api_key:
+            env_lines.append(f"DB_AGENT_COHERE_API_KEY={api_key}")
+
     env_lines.append(f"DB_AGENT_LLM_PROVIDER={provider}")
     env_lines.append(f"DB_AGENT_LLM_MODEL={model}")
+    env_lines.append(f"DB_AGENT_EMBEDDING_PROVIDER={emb_provider}")
+    env_lines.append(f"DB_AGENT_EMBEDDING_MODEL={emb_model}")
 
     # Write to BOTH locations: project .env (priority) and user config
     project_env = Path.cwd() / ".env"
