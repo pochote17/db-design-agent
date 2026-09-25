@@ -79,8 +79,8 @@ FORBIDDEN_SQL_PATTERNS = [
     # Comments used for injection
     r"/\*.*?\*/",
     r"--\s*$",
-    # Multiple statements (potential injection)
-    r";\s*(?:DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE|EXEC|COPY)",
+    # Multiple statements (potential injection) - REMOVED: causes false positives on legitimate DDL
+    # r";\s*(?:DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE|EXEC|COPY)",
 ]
 
 # Compile patterns for efficiency
@@ -218,6 +218,58 @@ def validate_input_length(text: str, field_name: str, max_length: int) -> None:
         )
 
 
+def _strip_non_sql(sql: str) -> str:
+    """Extract only valid SQL statements from potentially noisy output."""
+    import re
+    # First strip markdown fences - handle various formats
+    sql_clean = sql.strip()
+    # Remove leading ```sql or ``` (with optional whitespace/newline)
+    sql_clean = re.sub(r"^```(?:sql)?\s*\n?", "", sql_clean, flags=re.IGNORECASE)
+    # Remove trailing ```
+    sql_clean = re.sub(r"\n?\s*```$", "", sql_clean)
+    sql_clean = sql_clean.strip()
+
+    # Remove inline comments (-- and /* */)
+    lines = []
+    for line in sql_clean.splitlines():
+        # Remove -- comments
+        if "--" in line:
+            line = line.split("--")[0]
+        lines.append(line)
+    sql_clean = "\n".join(lines)
+
+    # Remove /* */ comments
+    sql_clean = re.sub(r"/\*.*?\*/", "", sql_clean, flags=re.DOTALL)
+
+    # Try to extract only valid SQL statements
+    # Look for statements starting with allowed keywords
+    allowed_starts = (
+        "CREATE TABLE",
+        "CREATE INDEX",
+        "CREATE UNIQUE INDEX",
+        "CREATE TYPE",
+        "COMMENT ON",
+        "ALTER TABLE",
+    )
+
+    # Split by semicolon and filter
+    statements = []
+    for stmt in sql_clean.split(";"):
+        stmt = stmt.strip()
+        if not stmt:
+            continue
+        # Check if statement starts with allowed keyword
+        stmt_upper = stmt.upper()
+        if any(stmt_upper.startswith(kw) for kw in allowed_starts):
+            statements.append(stmt + ";")
+
+    if statements:
+        return "\n".join(statements)
+
+    # Fallback: return cleaned original
+    return sql_clean
+
+
 def validate_ddl_output(sql: str) -> str:
     """
     Validate generated DDL for SQL injection and forbidden patterns.
@@ -227,15 +279,8 @@ def validate_ddl_output(sql: str) -> str:
     if not sql or not sql.strip():
         raise ValidationError(ValidationErrorCodes.EMPTY_DDL_OUTPUT)
 
-    # Clean up markdown code fences
-    sql_clean = sql.strip()
-    if sql_clean.startswith("```sql"):
-        sql_clean = sql_clean[6:]
-    elif sql_clean.startswith("```"):
-        sql_clean = sql_clean[3:]
-    if sql_clean.endswith("```"):
-        sql_clean = sql_clean[:-3]
-    sql_clean = sql_clean.strip()
+    # Clean up markdown code fences and extract SQL
+    sql_clean = _strip_non_sql(sql)
 
     # Check for forbidden patterns
     for pattern_regex in _FORBIDDEN_SQL_REGEX:
@@ -266,9 +311,16 @@ def validate_ddl_output(sql: str) -> str:
 
         # Check if statement type is allowed
         stmt_upper = stmt_type.upper() if stmt_type else ""
+        stmt_str = str(statement).strip().upper()
         if stmt_upper and stmt_upper not in ALLOWED_DDL_STATEMENTS:
+            # Allow CREATE TYPE (sqlparse returns "CREATE" for CREATE TYPE)
+            if stmt_upper == "CREATE" and stmt_str.startswith("CREATE TYPE"):
+                pass
+            # Allow COMMENT ON (sqlparse returns "UNKNOWN" for COMMENT ON)
+            elif stmt_upper == "UNKNOWN" and (stmt_str.startswith("COMMENT ON") or stmt_str.startswith("COMMENT ON COLUMN")):
+                pass
             # Also check for ALTER TABLE which is allowed but need to verify content
-            if not stmt_upper.startswith("ALTER TABLE"):
+            elif not stmt_upper.startswith("ALTER TABLE"):
                 _security_logger.log_event(
                     SecurityEventType.SQL_INJECTION,
                     f"Disallowed statement type: {stmt_type}",

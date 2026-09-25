@@ -31,6 +31,7 @@ from .nodes import (
 from .output import OutputFormat, print_results, save_outputs
 from .knowledge import ensure_knowledge_loaded
 from .llm import create_chat_model, create_embeddings
+from langchain_chroma import Chroma
 
 app = typer.Typer(
     name="db-design-agent",
@@ -93,45 +94,36 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
     ensure_knowledge_loaded(vectorstore)
 
     # Initial state
-    state = {
-        "business_context": context.strip(),
-        "relevant_patterns": [],
-        "conversation_history": [],
-        "clarification_round": 0,
-        "is_ready": False,
-        "enriched_context": "",
-        "pending_questions": [],
-        "database_schema": None,
-        "data_dictionary": [],
-        "sql_ddl": "",
-    }
+    from .models import AgentState
+    state = AgentState(business_context=context.strip(), interactive=True)
 
     # Run retrieve
     console.print("[bold]Step 1:[/bold] Retrieving relevant patterns...")
-    state = retrieve_node(state, vectorstore)
+    retrieve_result = retrieve_node(state, vectorstore)
+    state = AgentState.model_validate({**state.model_dump(), **retrieve_result})
 
     # Interactive loop: generate questions -> get answers -> process -> check readiness
     max_rounds = 3
 
-    while state["clarification_round"] < max_rounds and not state.get("is_ready", False):
+    while state.clarification_round < max_rounds and not state.is_ready:
         # Generate questions
-        console.print(f"\n[bold]Round {state['clarification_round'] + 1} of 3:[/bold] Generating questions...")
+        console.print(f"\n[bold]Round {state.clarification_round + 1} of 3:[/bold] Generating questions...")
         llm = create_chat_model(settings)
         question_result = generate_questions_node(state, llm)
-        state.update(question_result)
+        state = AgentState.model_validate({**state.model_dump(), **question_result})
 
-        if state.get("is_ready") or not state.get("pending_questions"):
+        if state.is_ready or not state.pending_questions:
             break
 
         # Display questions and get answers
-        questions = state["pending_questions"]
-        console.print(f"\n[bold cyan]Round {state['clarification_round'] + 1} of 3 - Clarifying Questions:[/bold cyan]")
+        questions = state.pending_questions
+        console.print(f"\n[bold cyan]Round {state.clarification_round + 1} of 3 - Clarifying Questions:[/bold cyan]")
         for idx, q in enumerate(questions):
-            console.print(f"\n[bold]Q{idx + 1}:[/bold] {q['question']}")
-            console.print(f"[dim]Reason: {q['reasoning']}[/dim]")
-            if q["type"] == "multiple_choice" and "options" in q:
-                console.print(f"[green]Options:[/green] {', '.join(q['options'])}")
-            elif q["type"] == "yes_no":
+            console.print(f"\n[bold]Q{idx + 1}:[/bold] {q.question}")
+            console.print(f"[dim]Reason: {q.reasoning}[/dim]")
+            if q.type == "multiple_choice" and q.options:
+                console.print(f"[green]Options:[/green] {', '.join(q.options)}")
+            elif q.type == "yes_no":
                 console.print("[green]Options:[/green] Yes / No")
             else:
                 console.print("[green]Type:[/green] Open-ended")
@@ -144,44 +136,44 @@ def _run_interactive_design(context: str, settings: Settings, console: Console) 
                 console.print("[yellow]Answer cannot be empty. Write 'N/A' if not applicable.[/yellow]")
 
             # Store answer in conversation history
-            state["conversation_history"].append({
-                "question_id": q["id"],
-                "question": q["question"],
+            state.conversation_history.append({
+                "question_id": q.id,
+                "question": q.question,
                 "answer": answer,
-                "round": state["clarification_round"] + 1,
+                "round": state.clarification_round + 1,
             })
 
         # Process answers
         console.print("\n[bold]Processing answers...[/bold]")
         llm = create_chat_model(settings)
         answer_result = process_answers_node(state, llm)
-        state.update(answer_result)
+        state = AgentState.model_validate({**state.model_dump(), **answer_result})
 
         # Check readiness
         console.print("[bold]Checking if ready to design...[/bold]")
         readiness_result = check_readiness_node(state, llm)
-        state.update(readiness_result)
+        state = AgentState.model_validate({**state.model_dump(), **readiness_result})
 
-        if state.get("is_ready"):
+        if state.is_ready:
             console.print("[green]✓[/green] Ready to generate schema!")
             break
 
-        console.print(f"[yellow]Need more information. Continuing to round {state['clarification_round'] + 1}...[/yellow]")
+        console.print(f"[yellow]Need more information. Continuing to round {state.clarification_round + 1}...[/yellow]")
 
     # If not ready after max rounds, force ready
-    if not state.get("is_ready"):
-        state["is_ready"] = True
+    if not state.is_ready:
+        state = AgentState.model_validate({**state.model_dump(), "is_ready": True})
         console.print("[yellow]Max rounds reached. Proceeding with current information...[/yellow]")
 
     # Now run the rest of the graph: design -> dictionary -> ddl
     console.print("\n[bold]Generating database schema...[/bold]")
     llm = create_chat_model(settings)
 
-    state = design_node(state, llm)
-    state = dictionary_node(state, llm)
-    state = ddl_node(state, llm)
+    state = AgentState.model_validate({**state.model_dump(), **design_node(state, llm)})
+    state = AgentState.model_validate({**state.model_dump(), **dictionary_node(state, llm)})
+    state = AgentState.model_validate({**state.model_dump(), **ddl_node(state, llm)})
 
-    return AgentState.model_validate(state)
+    return state
 
 
 def _validate_provider_config(provider: LLMProvider, settings: Settings) -> None:

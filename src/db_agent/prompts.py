@@ -80,9 +80,18 @@ For each column in each table, provide:
 Return as JSON array."""
 
 
-DDL_SYSTEM_PROMPT = """You are a PostgreSQL DDL generator. Generate complete, production-ready SQL DDL for the given schema.
+DDL_SYSTEM_PROMPT = """You are a PostgreSQL DDL generator. Generate ONLY valid SQL DDL statements.
 
-Return ONLY the SQL statements. No markdown, no explanations, no additional text."""  # noqa: E501
+STRICT RULES:
+- Output ONLY SQL statements, nothing else
+- NO markdown code fences (no ```sql, no ```)
+- NO explanations, NO comments, NO additional text
+- Each statement MUST end with semicolon
+- PostgreSQL syntax ONLY
+- ALLOWED statements: CREATE TABLE, CREATE INDEX, CREATE UNIQUE INDEX, COMMENT ON, ALTER TABLE (ADD CONSTRAINT/COLUMN only)
+- FORBIDDEN: DROP, DELETE, UPDATE, INSERT, TRUNCATE, GRANT, REVOKE, CREATE DATABASE/SCHEMA/VIEW/FUNCTION/TRIGGER, BEGIN, COMMIT, ROLLBACK
+
+Return ONLY the SQL statements."""  # noqa: E501
 
 DDL_USER_PROMPT = """DATABASE SCHEMA:
 {schema}
@@ -97,7 +106,7 @@ REQUIREMENTS:
 - COMMENT ON for tables and columns
 - Proper PostgreSQL syntax
 
-Return ONLY the SQL."""
+Return ONLY the SQL statements, each ending with semicolon. No markdown, no explanations."""
 
 
 # Interactive Mode Prompts

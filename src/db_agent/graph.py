@@ -108,7 +108,7 @@ async def run_agent(
     validated_context = validate_context_input(context)
 
     graph = build_graph(settings, cwd)
-    initial_state = AgentState(business_context=validated_context)
+    initial_state = AgentState(business_context=validated_context, interactive=False)
 
     result = await graph.ainvoke(initial_state)
     return AgentState.model_validate(result)

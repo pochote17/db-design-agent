@@ -2,6 +2,16 @@
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class Question(BaseModel):
+    model_config = ConfigDict(frozen=True, slots=True, extra="forbid")
+
+    id: str = Field(min_length=1)
+    type: str = Field(min_length=1)
+    question: str = Field(min_length=1)
+    reasoning: str = ""
+    options: list[str] | None = None
+
+
 class Column(BaseModel):
     model_config = ConfigDict(frozen=True, slots=True, extra="forbid")
 
@@ -71,7 +81,8 @@ class AgentState(BaseModel):
 
     # Interactive mode fields
     conversation_history: list[dict[str, str]] = []
-    pending_questions: list[str] = []
+    pending_questions: list[Question] = []
     clarification_round: int = 0
     is_ready: bool = False
     enriched_context: str = ""
+    interactive: bool = False

@@ -1,5 +1,6 @@
 """Question generation and processing nodes for interactive mode."""
 
+import sys
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import JsonOutputParser
 
@@ -15,6 +16,11 @@ from ..prompts import (
 
 def generate_questions_node(state: AgentState, llm: BaseChatModel) -> dict:
     """Generate clarifying questions for the current round."""
+    # Non-interactive mode: skip question generation, proceed directly to design
+    if not state.interactive:
+        print("DEBUG: Non-interactive mode, skipping questions", file=sys.stderr)
+        return {"is_ready": True}
+
     if state.clarification_round >= MAX_ROUNDS:
         return {"is_ready": True}
 
@@ -72,22 +78,28 @@ def process_answers_node(state: AgentState, llm: BaseChatModel) -> dict:
     answers = []
     for q in state.pending_questions:
         # Find the answer in conversation_history (last entries)
+        # q is a Question object, use attribute access
         answer_entry = next(
             (item for item in reversed(state.conversation_history)
-             if item.get("question_id") == q["id"] and "answer" in item),
+             if item.get("question_id") == q.id and "answer" in item),
             None
         )
         if answer_entry:
             answers.append({
-                "question_id": q["id"],
-                "question": q["question"],
-                "type": q["type"],
+                "question_id": q.id,
+                "question": q.question,
+                "type": q.type,
                 "answer": answer_entry["answer"],
                 "round": state.clarification_round + 1,
             })
 
+    # Non-interactive mode: no answers provided, skip enrichment
     if not answers:
-        raise ValidationError(ValidationErrorCodes.SQL_PARSE_FAILED)
+        return {
+            "enriched_context": state.business_context,
+            "conversation_history": state.conversation_history,
+            "clarification_round": state.clarification_round + 1,
+        }
 
     # Build QA pairs for the prompt
     qa_pairs = []

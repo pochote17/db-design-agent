@@ -18,13 +18,14 @@ ALLOWED_DDL_STATEMENTS = frozenset({
     "CREATE TABLE",
     "CREATE INDEX",
     "CREATE UNIQUE INDEX",
+    "CREATE TYPE",
     "COMMENT ON",
     "ALTER TABLE",
 })
 
 # Default models per provider
 DEFAULT_MODELS = {
-    "groq": "llama-3.1-70b-versatile",
+    "groq": "openai/gpt-oss-120b",
     "ollama": "llama3.1:8b",
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-haiku-20240307",
